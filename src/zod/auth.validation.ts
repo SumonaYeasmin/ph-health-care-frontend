@@ -29,3 +29,18 @@ export const loginValidationZodSchema = z.object({
         error: "Password must be at most 100 characters long",
     }),
 });
+
+// Zod Schema: Validation rules for resetting password (new password and confirmation)
+export const resetPasswordSchema = z.object({
+    newPassword: z.string().min(6, {
+        message: "Password is required and must be at least 6 characters long",
+    }).max(100, {
+        message: "Password must be at most 100 characters long",
+    }),
+    confirmPassword: z.string().min(6, {
+        message: "Confirm Password is required and must be at least 6 characters long",
+    }),
+}).refine((data: any) => data.newPassword === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+});

@@ -1,57 +1,58 @@
-// অ্যাপ্লিকেশনে ব্যবহারকারী বা ইউজারের রোলসমূহ নির্ধারণ (ADMIN, DOCTOR, PATIENT)
+// define user roles in the application (ADMIN, DOCTOR, PATIENT)
 export type UserRole = "ADMIN" | "DOCTOR" | "PATIENT";
 
-// রুট কনফিগারেশনের জন্য টাইপ ডেফিনিশন। 
-// exact: হুবহু মিলতে হবে এমন ইউআরএল এর তালিকা।
-// patterns: রেগুলার এক্সপ্রেশন (RegExp) প্যাটার্ন যা দিয়ে রুট মিলানো হবে (যেমন: /doctor/*)।
+// type definition for route configuration
+// exact: list of urls that must match exactly
+// patterns: list of regular expressions to match dynamic routes (e.g. /doctor/*)
 export type RouteConfig = {
     exact: string[],
     patterns: RegExp[],
 }
 
-// অথেন্টিকেশন সম্পর্কিত রুটস (এই পেজগুলোতে ইউজার লগইন না করে যায়)
+// authentication routes (accessible without logging in)
 export const authRoutes = ["/login", "/register", "/forgot-password", "/reset-password"];
 
-// সবার জন্য কমন এবং সুরক্ষিত রুট (যেমন: প্রোফাইল বা সেটিংস পেজ)
+// common protected routes accessible by all logged in users (e.g., profile or settings)
 export const commonProtectedRoutes: RouteConfig = {
-    exact: ["/my-profile", "/settings"],
+    exact: ["/my-profile", "/settings", "/change-password"],
     patterns: [], 
 }
 
-// শুধুমাত্র ডাক্তারদের জন্য সুরক্ষিত রুটস (যা /doctor দিয়ে শুরু হয়)
+
+// routes protected for doctors only (starts with /doctor)
 export const doctorProtectedRoutes: RouteConfig = {
     patterns: [/^\/doctor/], 
     exact: [], 
 }
 
-// শুধুমাত্র এডমিনদের জন্য সুরক্ষিত রুটস (যা /admin দিয়ে শুরু হয়)
+// routes protected for admins only (starts with /admin)
 export const adminProtectedRoutes: RouteConfig = {
     patterns: [/^\/admin/], 
     exact: [], 
 }
 
-// শুধুমাত্র রোগীদের জন্য সুরক্ষিত রুটস (যা /dashboard দিয়ে শুরু হয়)
+// routes protected for patients only (starts with /dashboard)
 export const patientProtectedRoutes: RouteConfig = {
     patterns: [/^\/dashboard/], 
     exact: [], 
 }
 
-// ইউজার যে পেজে যাওয়ার চেষ্টা করছে সেটি অথেন্টিকেশন রুট (লগইন/রেজিস্ট্রেশন) কিনা তা চেক করে
+// checks if the user is trying to access an authentication route (login/register)
 export const isAuthRoute = (pathname: string) => {
     return authRoutes.some((route: string) => route === pathname);
 }
 
-// একটি নির্দিষ্ট ইউআরএল (pathname) আমাদের সুরক্ষিত রুট কনফিগারেশনের সাথে ম্যাচ করে কিনা তা চেক করে
+// checks if a specific pathname matches the protected route configuration
 export const isRouteMatches = (pathname: string, routes: RouteConfig): boolean => {
-    // প্রথমে exact (হুবহু) রুটের সাথে ম্যাচিং চেক করে
+    // first check exact route matching
     if (routes.exact.includes(pathname)) {
         return true;
     }
-    // তারপর patterns (রেগুলার এক্সপ্রেশন) এর সাথে ম্যাচিং চেক করে
+    // then check pattern matching (regex)
     return routes.patterns.some((pattern: RegExp) => pattern.test(pathname))
 }
 
-// ইউআরএল দেখে সেই রুটের মালিক কে (ADMIN, DOCTOR, PATIENT বা COMMON) তা নির্ধারণ করে
+// determines the owner role of a route based on its path (ADMIN, DOCTOR, PATIENT, or COMMON)
 export const getRouteOwner = (pathname: string): "ADMIN" | "DOCTOR" | "PATIENT" | "COMMON" | null => {
     if (isRouteMatches(pathname, adminProtectedRoutes)) {
         return "ADMIN";
@@ -65,10 +66,10 @@ export const getRouteOwner = (pathname: string): "ADMIN" | "DOCTOR" | "PATIENT" 
     if (isRouteMatches(pathname, commonProtectedRoutes)) {
         return "COMMON";
     }
-    return null; // রুটটি যদি পাবলিক বা কোনো ক্যাটাগরির সাথে না মিলে
+    return null; // returns null if the route does not match any category or is public
 }
 
-// ইউজারের রোল অনুযায়ী ডিফল্ট ড্যাশবোর্ড রুট ঠিক করে
+// returns the default dashboard route based on user role
 export const getDefaultDashboardRoute = (role: UserRole): string => {
     if (role === "ADMIN") {
         return "/admin/dashboard";
@@ -82,21 +83,21 @@ export const getDefaultDashboardRoute = (role: UserRole): string => {
     return "/";
 }
 
-// লগইন করার পর কাঙ্ক্ষিত রিডাইরেক্ট রুটটি ওই ইউজারের রোল এর সাথে সামঞ্জস্যপূর্ণ কিনা তা ভ্যালিডেট করে
+// validates if the redirect path after login matches the user's role
 export const isValidRedirectForRole = (redirectPath: string, role: UserRole): boolean => {
-    // রিডাইরেক্ট পাথের মালিক কে তা বের করা হচ্ছে
+    // get the owner role of the redirect path
     const routeOwner = getRouteOwner(redirectPath);
 
-    // যদি রুটটি সবার জন্য উম্মুক্ত (null) বা কমন প্রোটেক্টেড (COMMON) হয়, তবে রিডাইরেক্ট করা যাবে
+    // allow redirect if the route is public (null) or a common protected route (COMMON)
     if (routeOwner === null || routeOwner === "COMMON") {
         return true;
     }
 
-    // যদি রুটের মালিক আর ইউজারের রোল মিলে যায়, তবে রিডাইরেক্ট করা যাবে
+    // allow redirect if the route owner matches the user role
     if (routeOwner === role) {
         return true;
     }
 
-    // অন্যথায় রিডাইরেক্ট করা যাবে না (যেমন: রোগীকে এডমিন পেজে রিডাইরেক্ট করা যাবে না)
+    // otherwise deny redirect (e.g. patients cannot access admin pages)
     return false;
 }

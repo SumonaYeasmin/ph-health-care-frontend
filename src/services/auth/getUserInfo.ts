@@ -30,7 +30,9 @@ export const getUserInfo = async (): Promise<UserInfo | null> => {
             name: verifiedToken.name || "Unknown User",
             email: verifiedToken.email,
             role: verifiedToken.role,
+            needPasswordChange: verifiedToken.needPasswordChange,
         };
+
 
         return userInfo;
     } catch (error: any) {

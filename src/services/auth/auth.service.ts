@@ -1,118 +1,273 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-"use server"
+"use server";
+import { getDefaultDashboardRoute, isValidRedirectForRole, UserRole } from "@/src/lib/auth-utils";
 
-import { serverFetch } from "@/src/lib/serverFetch";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
 import { revalidateTag } from "next/cache";
+import { redirect } from "next/navigation";
+import { getUserInfo } from "./getUserInfo";
+// import { deleteCookie, getCookie, setCookie } from "./tokenHandlers";
+import { serverFetch } from "@/src/lib/serverFetch";
+import { zodValidator } from "@/src/lib/zodValidator";
+import { deleteCookie, getCookie, setCookie } from "./tokenHandler";
+import { resetPasswordSchema } from "@/src/zod/auth.validation";
 
-/**
- * Server Action to update the currently logged-in user's profile.
- * It extracts fields from the submitted FormData, structures the payload 
- * based on role specific requirements, and sends a PATCH request to the backend.
- * Finally, it triggers Next.js cache revalidation to update the profile UI immediately.
- * 
- * @param {FormData} formData - The submitted profile update form data
- * @returns {Promise<{success: boolean, message: string, data?: any}>} The result of the update operation
- */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export async function updateMyProfile(formData: FormData) {
     try {
-        // Extract the selected file from the form data
-        const file = formData.get("file") as File;
-        
-        // Extract common fields shared by all roles
-        const name = formData.get("name") as string;
-        const contactNumber = formData.get("contactNumber") as string;
-        const address = formData.get("address") as string;
-        
-        // Build the base payload object
-        const payload: any = {
-            name,
-            contactNumber,
-            address
-        };
-        
-        // Extract doctor-specific fields if they exist in the form data
-        const designation = formData.get("designation");
-        if (designation) payload.designation = designation;
-        
-        const qualification = formData.get("qualification");
-        if (qualification) payload.qualification = qualification;
-        
-        const currentWorkingPlace = formData.get("currentWorkingPlace");
-        if (currentWorkingPlace) payload.currentWorkingPlace = currentWorkingPlace;
-        
-        const experience = formData.get("experience");
-        if (experience !== null && experience !== "") payload.experience = Number(experience);
-        
-        const appointmentFee = formData.get("appointmentFee");
-        if (appointmentFee !== null && appointmentFee !== "") payload.appointmentFee = Number(appointmentFee);
-        
-        const gender = formData.get("gender");
-        if (gender) payload.gender = gender;
-        
-        // Convert the JSON payload to string and append to new FormData
-        const newFormData = new FormData();
-        newFormData.append("data", JSON.stringify(payload));
-        
-        // Append the uploaded image file if present and valid
-        if (file && file.size > 0) {
-            newFormData.append("file", file);
-        }
-        
-        // Send the PATCH request to the backend update endpoint
-        const response = await serverFetch.patch("/user/update-my-profile", {
-            body: newFormData
+        // Create a new FormData with the data property
+        const uploadFormData = new FormData();
+
+        // Get all form fields except the file
+        const data: any = {};
+        formData.forEach((value, key) => {
+            if (key !== 'file' && value) {
+                data[key] = value;
+            }
         });
-        
-        // Handle failed API requests
-        if (!response.ok) {
-            const errorText = await response.text();
-            return {
-                success: false,
-                message: errorText || `Request failed with status ${response.status}`
-            }
+
+        // Add the data as JSON string
+        uploadFormData.append('data', JSON.stringify(data));
+
+        // Add the file if it exists
+        const file = formData.get('file');
+        if (file && file instanceof File && file.size > 0) {
+            uploadFormData.append('file', file);
         }
-        
-        // Parse JSON response and revalidate cached pages/data
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-            const result = await response.json();
-            
-            // Revalidate cached Next.js profile data to show updates instantly
-            revalidateTag("profile");
-            return result;
-        } else {
-            const text = await response.text();
-            return {
-                success: false,
-                message: text || "Invalid response format from server"
-            }
-        }
+
+        const response = await serverFetch.patch(`/user/update-my-profile`, {
+            body: uploadFormData,
+        });
+
+        const result = await response.json();
+
+        revalidateTag("user-info", { expire: 0 });
+        return result;
     } catch (error: any) {
-        console.error("Error updating profile:", error);
+        console.log(error);
         return {
             success: false,
-            message: error.message || "Something went wrong"
+            message: `${process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'}`
         };
     }
 }
 
-/**
- * Server Function to fetch the currently logged-in user's profile details.
- * It sends a GET request to the backend /user/me endpoint and configures 
- * Next.js caching with the tag 'profile' for on-demand revalidation.
- * 
- * @returns {Promise<{success: boolean, message?: string, data?: any}>} The fetched profile data
- */
+// Reset Password
+export async function resetPassword(_prevState: any, formData: FormData) {
+
+    const redirectTo = formData.get('redirect') || null;
+
+    // Build validation payload
+    const validationPayload = {
+        newPassword: formData.get("newPassword") as string,
+        confirmPassword: formData.get("confirmPassword") as string,
+    };
+
+    // Validate
+    const validatedPayload = zodValidator(validationPayload, resetPasswordSchema);
+
+    if (!validatedPayload.success && validatedPayload.errors) {
+        return {
+            success: false,
+            message: "Validation failed",
+            formData: validationPayload,
+            errors: validatedPayload.errors,
+        };
+    }
+
+    try {
+
+        const accessToken = await getCookie("accessToken");
+
+        if (!accessToken) {
+            throw new Error("User not authenticated");
+        }
+
+        const verifiedToken = jwt.verify(accessToken as string, process.env.JWT_SECRET!) as jwt.JwtPayload;
+
+        const userRole: UserRole = verifiedToken.role;
+
+        const user = await getUserInfo();
+        // API Call
+        const response = await serverFetch.post("/auth/reset-password", {
+            body: JSON.stringify({
+                id: user?.id,
+                password: validationPayload.newPassword,
+            }),
+            headers: {
+                "Authorization": accessToken,
+                "Content-Type": "application/json",
+            },
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.message || "Reset password failed");
+        }
+
+        if (result.success) {
+            // await get
+            revalidateTag("user-info", { expire: 0 });
+        }
+
+        if (redirectTo) {
+            const requestedPath = redirectTo.toString();
+            if (isValidRedirectForRole(requestedPath, userRole)) {
+                redirect(`${requestedPath}?loggedIn=true`);
+            } else {
+                redirect(`${getDefaultDashboardRoute(userRole)}?loggedIn=true`);
+            }
+        } else {
+            redirect(`${getDefaultDashboardRoute(userRole)}?loggedIn=true`);
+        }
+
+    } catch (error: any) {
+        // Re-throw NEXT_REDIRECT errors so Next.js can handle them
+        if (error?.digest?.startsWith("NEXT_REDIRECT")) {
+            throw error;
+        }
+        return {
+            success: false,
+            message: error?.message || "Something went wrong",
+            formData: validationPayload,
+        };
+    }
+}
+
+export async function getNewAccessToken() {
+    try {
+        const accessToken = await getCookie("accessToken");
+        const refreshToken = await getCookie("refreshToken");
+
+        //Case 1: Both tokens are missing - user is logged out
+        if (!accessToken && !refreshToken) {
+            return {
+                tokenRefreshed: false,
+            }
+        }
+
+        // Case 2 : Access Token exist- and need to verify
+        if (accessToken) {
+            const verifiedToken = await verifyAccessToken(accessToken);
+
+            if (verifiedToken.success) {
+                return {
+                    tokenRefreshed: false,
+                }
+            }
+        }
+
+        //Case 3 : refresh Token is missing- user is logged out
+        if (!refreshToken) {
+            return {
+                tokenRefreshed: false,
+            }
+        }
+
+        //Case 4: Access Token is invalid/expired- try to get a new one using refresh token
+        // This is the only case we need to call the API
+
+        // Now we know: accessToken is invalid/missing AND refreshToken exists
+        // Safe to call the API
+        let accessTokenObject: null | any = null;
+        let refreshTokenObject: null | any = null;
+
+        // API Call - serverFetch will skip getNewAccessToken for /auth/refresh-token endpoint
+        const response = await serverFetch.post("/auth/refresh-token", {
+            headers: {
+                Cookie: `refreshToken=${refreshToken}`,
+            },
+        });
+
+        const result = await response.json();
+
+        console.log("access token refreshed!!");
+
+        const setCookieHeaders = response.headers.getSetCookie();
+
+        if (setCookieHeaders && setCookieHeaders.length > 0) {
+            setCookieHeaders.forEach((cookie: string) => {
+                const parsedCookie = parse(cookie);
+
+                if (parsedCookie['accessToken']) {
+                    accessTokenObject = parsedCookie;
+                }
+                if (parsedCookie['refreshToken']) {
+                    refreshTokenObject = parsedCookie;
+                }
+            })
+        } else {
+            throw new Error("No Set-Cookie header found");
+        }
+
+        if (!accessTokenObject) {
+            throw new Error("Tokens not found in cookies");
+        }
+
+        if (!refreshTokenObject) {
+            throw new Error("Tokens not found in cookies");
+        }
+
+        await deleteCookie("accessToken");
+        await setCookie("accessToken", accessTokenObject.accessToken, {
+            secure: true,
+            httpOnly: true,
+            maxAge: parseInt(accessTokenObject['Max-Age']) || 1000 * 60 * 60,
+            path: accessTokenObject.Path || "/",
+            sameSite: accessTokenObject['SameSite'] || "none",
+        });
+
+        await deleteCookie("refreshToken");
+        await setCookie("refreshToken", refreshTokenObject.refreshToken, {
+            secure: true,
+            httpOnly: true,
+            maxAge: parseInt(refreshTokenObject['Max-Age']) || 1000 * 60 * 60 * 24 * 90,
+            path: refreshTokenObject.Path || "/",
+            sameSite: refreshTokenObject['SameSite'] || "none",
+        });
+
+        if (!result.success) {
+            throw new Error(result.message || "Token refresh failed");
+        }
+
+
+        return {
+            tokenRefreshed: true,
+            success: true,
+            message: "Token refreshed successfully"
+        };
+
+
+    } catch (error: any) {
+        return {
+            tokenRefreshed: false,
+            success: false,
+            message: error?.message || "Something went wrong",
+        };
+    }
+}
+
+// Helper function to verify access token locally
+async function verifyAccessToken(token: string) {
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as jwt.JwtPayload;
+        return { success: true, decoded };
+    } catch (error) {
+        return { success: false, error };
+    }
+}
+
+// Service function to fetch user profile details
 export async function getMyProfile() {
     try {
-        // Send GET request with a tag for caching configuration
         const response = await serverFetch.get("/user/me", {
             next: {
-                tags: ["profile"] // Enables cache clearing using revalidateTag("profile")
+                tags: ["profile"]
             }
         });
         
-        // Handle failed profile retrieval requests
         if (!response.ok) {
             const errorText = await response.text();
             return {
@@ -121,7 +276,6 @@ export async function getMyProfile() {
             }
         }
         
-        // Parse and return the user profile details
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
             const result = await response.json();
