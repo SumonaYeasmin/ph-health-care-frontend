@@ -92,7 +92,7 @@ export async function resetPassword(_prevState: any, formData: FormData) {
         // API Call
         const response = await serverFetch.post("/auth/reset-password", {
             body: JSON.stringify({
-                id: user?.id,
+                email: user?.email,
                 password: validationPayload.newPassword,
             }),
             headers: {
