@@ -9,13 +9,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import { ScrollArea } from "@/src/components/ui/scroll-area";
 import { IDoctor } from "@/types/doctor.interface";
-import { Calendar, Clock, DollarSign, User } from "lucide-react";
+import { IDoctorSchedule } from "@/types/schedule.interface";
+import { format } from "date-fns";
+import { Calendar, Clock } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 interface BookAppointmentDialogProps {
-  doctor: IDoctor;
+  doctor: IDoctor & { doctorSchedules?: IDoctorSchedule[] };
   isOpen: boolean;
   onClose: () => void;
 }
@@ -25,121 +27,138 @@ export default function BookAppointmentDialog({
   isOpen,
   onClose,
 }: BookAppointmentDialogProps) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [selectedDate, setSelectedDate] = useState("");
-  const [selectedTime, setSelectedTime] = useState("");
+  const doctorSchedules = doctor.doctorSchedules || [];
+  const [selectedSchedule, setSelectedSchedule] =
+    useState<IDoctorSchedule | null>(null);
 
-  const handleBook = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDate || !selectedTime) {
-      toast.error("Please select a date and time slot");
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      // Simulate API call for booking an appointment
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      toast.success(`Appointment successfully booked with Dr. ${doctor.name}!`);
-      onClose();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to book appointment. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
+  const handleCloseModal = () => {
+    setSelectedSchedule(null);
+    onClose();
   };
 
-  const nextThreeDays = Array.from({ length: 3 }).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i + 1);
-    return d.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
-  });
+  const groupSchedulesByDate = () => {
+    const grouped: Record<string, IDoctorSchedule[]> = {};
 
-  const timeSlots = ["09:00 AM", "10:30 AM", "02:00 PM", "04:30 PM"];
+    doctorSchedules.forEach((schedule: IDoctorSchedule) => {
+      if (!schedule.schedule?.startDateTime) return;
+
+      const startDate = new Date(schedule.schedule.startDateTime)
+        .toISOString()
+        .split("T")[0];
+
+      if (startDate) {
+        if (!grouped[startDate]) {
+          grouped[startDate] = [];
+        }
+        grouped[startDate].push(schedule);
+      }
+    });
+
+    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+  };
+
+  const groupedSchedules = groupSchedulesByDate();
+
+  // Check if we have schedules but no schedule data (API issue)
+  const hasSchedulesWithoutData =
+    doctorSchedules.length > 0 && groupedSchedules.length === 0;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[450px]">
-        <DialogHeader>
-          <DialogTitle className="text-xl flex items-center gap-2">
-            <User className="h-5 w-5 text-primary" /> Book Appointment
-          </DialogTitle>
-          <DialogDescription>
-            Select a date and time slot for your consultation with Dr. {doctor.name}.
-          </DialogDescription>
-        </DialogHeader>
+    <Dialog open={isOpen} onOpenChange={handleCloseModal}>
+      <DialogContent className="max-w-2xl max-h-[80vh]">
+        <>
+          <DialogHeader>
+            <DialogTitle>Book Appointment with Dr. {doctor.name}</DialogTitle>
+            <DialogDescription>
+              Select an available time slot for your consultation
+            </DialogDescription>
+          </DialogHeader>
 
-        <form onSubmit={handleBook} className="space-y-4 py-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-muted-foreground" /> Select Date
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {nextThreeDays.map((date) => (
-                <button
-                  key={date}
-                  type="button"
-                  onClick={() => setSelectedDate(date)}
-                  className={`p-2.5 border rounded-lg text-sm text-center transition-all ${
-                    selectedDate === date
-                      ? "border-primary bg-primary/5 text-primary font-medium shadow-xs"
-                      : "hover:bg-muted border-input"
-                  }`}
-                >
-                  {date}
-                </button>
-              ))}
+          <div className="space-y-4">
+            {/* Doctor Info */}
+            <div className="flex items-center gap-3 p-4 bg-muted rounded-lg">
+              <div>
+                <p className="font-medium">{doctor.designation}</p>
+                <p className="text-sm text-muted-foreground">
+                  Consultation Fee: ${doctor.appointmentFee}
+                </p>
+              </div>
             </div>
+
+            {/* Schedules */}
+            {hasSchedulesWithoutData ? (
+              <div className="text-center py-12">
+                <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">
+                  Schedule data not available
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  The doctor has {doctorSchedules.length} schedule
+                  {doctorSchedules.length !== 1 ? "s" : ""}, but detailed
+                  information is not loaded.
+                </p>
+              </div>
+            ) : groupedSchedules.length === 0 ? (
+              <div className="text-center py-12">
+                <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">
+                  No available slots at the moment
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Please check back later
+                </p>
+              </div>
+            ) : (
+              <ScrollArea className="h-[300px] pr-4">
+                <div className="space-y-4">
+                  {groupedSchedules.map(([date, dateSchedules]) => (
+                    <div key={date}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        <h4 className="font-medium">
+                          {format(new Date(date), "EEEE, MMMM d, yyyy")}
+                        </h4>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {dateSchedules.map((schedule: IDoctorSchedule) => {
+                          const startTime = schedule.schedule?.startDateTime
+                            ? new Date(schedule.schedule.startDateTime)
+                            : null;
+
+                          return (
+                            <Button
+                              key={schedule.scheduleId}
+                              variant={
+                                selectedSchedule?.scheduleId ===
+                                schedule.scheduleId
+                                  ? "default"
+                                  : "outline"
+                              }
+                              className="justify-start h-auto py-2"
+                              onClick={() => setSelectedSchedule(schedule)}
+                            >
+                              <Clock className="h-4 w-4 mr-2" />
+                              <span className="text-sm">
+                                {startTime
+                                  ? format(startTime, "h:mm a")
+                                  : "N/A"}
+                              </span>
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <Clock className="h-4 w-4 text-muted-foreground" /> Select Time Slot
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {timeSlots.map((time) => (
-                <button
-                  key={time}
-                  type="button"
-                  onClick={() => setSelectedTime(time)}
-                  className={`p-2.5 border rounded-lg text-sm text-center transition-all ${
-                    selectedTime === time
-                      ? "border-primary bg-primary/5 text-primary font-medium shadow-xs"
-                      : "hover:bg-muted border-input"
-                  }`}
-                >
-                  {time}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-3 bg-muted/50 rounded-lg flex items-center justify-between text-sm">
-            <span className="text-muted-foreground flex items-center gap-1">
-              <DollarSign className="h-4 w-4" /> Consultation Fee:
-            </span>
-            <span className="font-semibold">${doctor.appointmentFee}</span>
-          </div>
-
-          <DialogFooter className="pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isLoading}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Booking..." : "Confirm Booking"}
-            </Button>
+          <DialogFooter>
+            <Button onClick={handleCloseModal}>Close</Button>
           </DialogFooter>
-        </form>
+        </>
       </DialogContent>
     </Dialog>
   );
