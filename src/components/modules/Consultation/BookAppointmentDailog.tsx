@@ -12,9 +12,12 @@ import {
 import { ScrollArea } from "@/src/components/ui/scroll-area";
 import { IDoctor } from "@/types/doctor.interface";
 import { IDoctorSchedule } from "@/types/schedule.interface";
+import { createAppointment } from "@/src/services/patient/appointment.services";
 import { format } from "date-fns";
-import { Calendar, Clock } from "lucide-react";
+import { Calendar, Clock, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
 
 interface BookAppointmentDialogProps {
   doctor: IDoctor & { doctorSchedules?: IDoctorSchedule[] };
@@ -27,13 +30,42 @@ export default function BookAppointmentDialog({
   isOpen,
   onClose,
 }: BookAppointmentDialogProps) {
+  const router = useRouter();
   const doctorSchedules = doctor.doctorSchedules || [];
   const [selectedSchedule, setSelectedSchedule] =
     useState<IDoctorSchedule | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleCloseModal = () => {
     setSelectedSchedule(null);
     onClose();
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!doctor.id || !selectedSchedule) {
+      toast.error("Please select a slot first");
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const res = await createAppointment({
+        doctorId: doctor.id,
+        scheduleId: selectedSchedule.scheduleId
+      });
+      if (res.success) {
+        toast.success("Appointment booked successfully!");
+        handleCloseModal();
+        router.refresh();
+      } else {
+        toast.error(res.message || "Failed to book appointment");
+      }
+    } catch (error) {
+      console.error("Booking error:", error);
+      toast.error("An error occurred. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const groupSchedulesByDate = () => {
@@ -131,7 +163,7 @@ export default function BookAppointmentDialog({
                               key={schedule.scheduleId}
                               variant={
                                 selectedSchedule?.scheduleId ===
-                                schedule.scheduleId
+                                  schedule.scheduleId
                                   ? "default"
                                   : "outline"
                               }
@@ -155,8 +187,20 @@ export default function BookAppointmentDialog({
             )}
           </div>
 
-          <DialogFooter>
-            <Button onClick={handleCloseModal}>Close</Button>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleCloseModal} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmBooking} disabled={!selectedSchedule || isLoading}>
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Booking...
+                </>
+              ) : (
+                "Confirm Booking"
+              )}
+            </Button>
           </DialogFooter>
         </>
       </DialogContent>
