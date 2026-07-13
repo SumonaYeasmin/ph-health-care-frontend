@@ -1,7 +1,11 @@
+"use client";
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/src/components/ui/avatar";
 import { Badge } from "@/src/components/ui/badge";
+import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { IDoctor } from "@/types/doctor.interface";
+import BookAppointmentDialog from "@/src/components/modules/Consultation/BookAppointmentDailog";
 import {
   Briefcase,
   Calendar,
@@ -13,6 +17,7 @@ import {
   Phone,
   Star,
 } from "lucide-react";
+import { useState } from "react";
 
 // Props interface matching the expected IDoctor structure
 interface DoctorProfileContentProps {
@@ -20,6 +25,7 @@ interface DoctorProfileContentProps {
 }
 
 const DoctorProfileContent = ({ doctor }: DoctorProfileContentProps) => {
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
   // Extracting first two initials of the doctor's name to use as a fallback if profilePhoto is absent
   const initials = doctor.name
     .split(" ")
@@ -96,12 +102,11 @@ const DoctorProfileContent = ({ doctor }: DoctorProfileContentProps) => {
                 </div>
               </div>
 
-              {/* {!isModal && (
-                <div className="flex gap-4">
-                  <Button>Book Appointment</Button>
-                  <Button variant="outline">View Schedule</Button>
-                </div>
-              )} */}
+              <div className="flex gap-4">
+                <Button onClick={() => setShowScheduleModal(true)} className="bg-purple-600 hover:bg-purple-700 text-white font-semibold">
+                  Book Appointment
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -185,6 +190,12 @@ const DoctorProfileContent = ({ doctor }: DoctorProfileContentProps) => {
           <p className="text-muted-foreground">{doctor.qualification}</p>
         </CardContent>
       </Card>
+
+      <BookAppointmentDialog
+        doctor={doctor}
+        isOpen={showScheduleModal}
+        onClose={() => setShowScheduleModal(false)}
+      />
     </div>
   );
 };
